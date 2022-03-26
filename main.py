@@ -75,7 +75,13 @@ def database_loader():
         file_credentials = open(credentials_file, 'r')
 
     data = file.readlines()[-1]     # reads the last line of the file; this entry holds the latest additions to the database
-    data_credentials = file_credentials.readlines()[-1]
+    try:
+        data_credentials = file_credentials.readlines()[-1]
+    except:
+        GUI.generic_info_popup("No SSH credentials found!")
+        data_credentials = '\n'
+        file_credentials.close()
+        file.close()
 
     global ssh_credentials
     global ip_mac_database
@@ -85,6 +91,10 @@ def database_loader():
         ip_mac_database['0.0.0.0'] = '00:00:00:00:00:00'        # Placeholder for IP - MAC mapping
     else:
         ip_mac_database = eval(data)        # if the file is not empty, load it as a dictionary
+        try:
+            del ip_mac_database['']
+        except:
+            file.close()
     file.close()
 
     if data_credentials == '\n':        # if the file is empty, create a new entry to it
