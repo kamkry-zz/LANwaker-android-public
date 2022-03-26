@@ -143,7 +143,11 @@ class ssh_handler:
         ssh_client = pr.SSHClient()
         ssh_client.set_missing_host_key_policy(pr.AutoAddPolicy())
         ssh_credentials_list = list(ssh_credentials.items())
-        usr, passwd = ssh_credentials_list[-1][0], ssh_credentials_list[-1][1]
+        try:
+            usr, passwd = ssh_credentials_list[-1][0], ssh_credentials_list[-1][1]
+        except:
+            GUI.generic_info_popup("No SSH credentials found!")
+            return
         ssh_client.connect(selected_ip,username=usr,password=passwd)
         stdin, stdout, stderr = ssh_client.exec_command('net_dev=$(ip a | grep -Eo "en[a-z0-9]+" | grep -Eo "^enp[0-9][a-z]0\b");'     # get the network device name
                                                         ' ethtool -s $net_dev wol g;'       # set the WOL mode to magic packet
