@@ -14,6 +14,8 @@ from kivy.uix.checkbox import CheckBox
 import socket
 import paramiko as pr
 import os
+import requests
+import re
 
 # Below.: these dependencies are for successful build on Android platform; unused but required!
 import cryptography
@@ -181,6 +183,96 @@ class udp_socket:
         else:
             return False
 
+class discovery:
+
+    global proxmox_ips
+    proxmox_ips = []
+
+    global proxmox_ips_mac
+    proxmox_ips_mac = {}
+
+    def convert_CIDR(subnet_and_port):
+
+        subnetwork_port = list(subnet_and_port.values())[0]
+
+        ip_start = list(subnet_and_port.keys())[0][0]
+        ip_range = list(subnet_and_port.keys())[0][1]
+        ip_end = ip_start.split('.')
+        if len(ip_end) != 4:
+            GUI.generic_info_popup("Wrong IP format")
+            return
+        ip_end[3] = str(int(ip_end[3]) + int(ip_range))
+        if int(ip_end[3]) > 255:
+            ip_end[3] = str(int(ip_end[3]) - 255)
+            ip_end[2] = str(int(ip_end[2]) + 1)
+        ip_end = '.'.join(ip_end)
+
+        return discovery.scan_network(start_ip=ip_start, end_ip=ip_end, subnetwork_port=subnetwork_port)
+
+    def scan_network(*self, start_ip, end_ip, subnetwork_port):
+        ip_masked_address = start_ip.split('.')
+        ip_masked_address = ip_masked_address[0] + '.' + ip_masked_address[1] + '.' + ip_masked_address[2] + '.'
+        #
+        # WHAT IF THIRD OCTET HAS INCREASED?
+        #
+        port = str(subnetwork_port)
+        ip_range = [ip_masked_address + str(i) for i in range(2, 6)]
+        for ip in ip_range:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1)
+            try:
+                result = sock.connect_ex((ip, int(port)))
+            except:
+                GUI.generic_info_popup("Could not connect\nto the selected IPs")
+                return
+            if result == 0:
+                proxmox_ips.append(ip)
+            else:
+                continue
+            sock.close()
+        return discovery.verify_if_proxmox(proxmox_ips)
+
+    def verify_if_proxmox(proxmox_ips):
+        port = "8006"
+        for ip in proxmox_ips:
+            https_response = requests.get("https://" + str(ip) + ":" + str(port), verify=False)
+            tx = https_response.text
+            response = re.split("<title>", tx)
+            response = re.split("</title>", response[1])
+            response = response[0]
+            if "Proxmox" in response:
+                continue
+            else:
+                proxmox_ips.remove(ip)
+                continue
+        return discovery.retrive_proxmox_mac(proxmox_ips)
+
+    def retrive_proxmox_mac(proxmox_ips):
+        for ip in proxmox_ips:
+            ssh_client = pr.SSHClient()
+            ssh_client.set_missing_host_key_policy(pr.AutoAddPolicy())
+            ssh_credentials_list = list(ssh_credentials.items())
+            try:
+                usr, passwd = ssh_credentials_list[-1][0], ssh_credentials_list[-1][1]
+            except:
+                GUI.generic_info_popup("No SSH credentials found!")
+                return
+            ssh_client.connect(ip, username=usr, password=passwd)
+            ip = str(ip)
+            stdin, stdout, stderr = ssh_client.exec_command(f'webui_ip={ip};'
+                                                            'ip a | grep -B1 "$webui_ip" | grep -Eo "([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})" | grep -Ev "(ff:){5}ff"')
+            proxmox_mac = stdout.read().decode('ascii').strip("\n")
+            proxmox_ips_mac[ip] = proxmox_mac
+        return discovery.append_ips_mac_to_list()
+
+    @staticmethod
+    def append_ips_mac_to_list():
+        amount_found = 0
+        for ip, mac in proxmox_ips_mac.items():
+            ip_mac_database[ip] = mac
+            amount_found += 1
+        return dump_database_to_file(), GUI.generic_info_popup(f'Discovered {amount_found} Proxmoxes')
+
 # ###
 # FRONTEND
 # ###
@@ -272,6 +364,43 @@ class GUI(App):
 
         popup.open()
 
+    def input_subnet_and_port(self, event):
+        container = FloatLayout()
+
+        self.ip_start = TextInput(hint_text='<IP start>', multiline=False, size_hint=(.75, 0.125), pos_hint={'center_x': .5, 'center_y': .85},
+                                  halign='center', font_size=30)
+        container.add_widget(Label(text='Enter <IP start>.:', font_size='25sp', size_hint=(1, 0.2), pos_hint={'center_x': .5, 'center_y': .95}))
+        container.add_widget(self.ip_start)
+
+        self.ip_end = TextInput(hint_text='<IPs to scan?>', multiline=False, size_hint=(.75, 0.125), pos_hint={'center_x': .5, 'center_y': .65},
+                                  halign='center', font_size=30)
+        container.add_widget(Label(text='How many IPs.:', font_size='25sp', size_hint=(1, 0.2), pos_hint={'center_x': .5, 'center_y': .75}))
+        container.add_widget(self.ip_end)
+
+        self.port = TextInput(hint_text='<Port>', multiline=False, size_hint=(.75, 0.125), pos_hint={'center_x': .5, 'center_y': .45},
+                              halign='center', font_size=30)
+        container.add_widget(Label(text='Enter <Port>.:', font_size='25sp', size_hint=(1, 0.2), pos_hint={'center_x': .5, 'center_y': .55}))
+        container.add_widget(self.port)
+
+        popup = Popup(title='Add new <Subnet> : <Port>',
+                      content=container,
+                      size_hint=(0.8, 0.8))
+
+        execute = Button(text='Save', background_color=green, size_hint=(0.8, 0.15), pos_hint={'center_x': .5, 'center_y': .15}, halign='center')
+        execute.bind(on_press= self.append_to_subnet_and_port_on_tap, on_release=popup.dismiss)
+        container.add_widget(execute)
+
+        popup.open()
+
+    def append_to_subnet_and_port_on_tap(self, *arg):
+        subnet_and_port_database = {}
+        ip_range = (self.ip_start.text, self.ip_end.text)
+        if int(self.ip_end.text) > 255:
+            GUI.generic_info_popup('<IPs to scan?>\nmust be less than 255')
+            return
+        subnet_and_port_database[ip_range] = self.port.text
+        discovery.convert_CIDR(subnet_and_port_database)
+
     def append_to_credentials_on_tap(self, event):
         ssh_credentials[self.username.text] = self.password.text
 
@@ -299,7 +428,7 @@ class GUI(App):
         info_popup_wrong_ip.open()
 
     def generic_info_popup(reason):
-        info_popup = Popup(title='Error info', content=Label(text=reason), size_hint=(0.6, 0.25))
+        info_popup = Popup(title='Info', content=Label(text=reason), size_hint=(0.6, 0.25))
         info_popup.open()
 
     # Below.: packing the frontend up
@@ -313,7 +442,8 @@ class GUI(App):
         btn_dump = Button(text='Save DB',size_hint=(0.25,0.1),background_color=colors[3],pos_hint={'x':0.05,'y':0.6})
         btn_new_entry = Button(text='Add IP-MAC',size_hint=(0.25,0.1),background_color=colors[3],pos_hint={'x':0.7,'y':0.6})
         btn_proxmox_credentials = Button(text='     Enter\nCredentials',size_hint=(0.25,0.1),background_color=colors[3],pos_hint={'x':0.375,'y':0.6})
-        btn_check_status = Button(text='Server Status',size_hint=(0.375,0.075),background_color=colors[5],pos_hint={'x':0.31,'y':0.5125})
+        btn_check_status = Button(text='Server Status',size_hint=(0.375,0.075),background_color=colors[5],pos_hint={'x':0.05,'y':0.5125})
+        btn_discover_proxmoxes = Button(text='Discover Proxmoxes',size_hint=(0.375,0.075),background_color=colors[4],pos_hint={'x':0.575,'y':0.5125})
 
         btn_shutdown.bind(on_release = self.shutdown_on_tap)
         btn_wol.bind(on_release = self.send_wol_on_tap)
@@ -321,6 +451,7 @@ class GUI(App):
         btn_new_entry.bind(on_release = self.database_manager) # <= REPLACED!!
         btn_proxmox_credentials.bind(on_release = self.add_new_credentials)
         btn_check_status.bind(on_release = self.change_color_on_status_check)
+        btn_discover_proxmoxes.bind(on_release = self.input_subnet_and_port)
 
         layout.add_widget(self.spinner)
         layout.add_widget(btn_wol)
@@ -329,6 +460,7 @@ class GUI(App):
         layout.add_widget(btn_new_entry)
         layout.add_widget(btn_proxmox_credentials)
         layout.add_widget(btn_check_status)
+        layout.add_widget(btn_discover_proxmoxes)
 
         return layout
 
