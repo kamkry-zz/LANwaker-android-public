@@ -216,7 +216,10 @@ class discovery:
         # WHAT IF THIRD OCTET HAS INCREASED?
         #
         port = str(subnetwork_port)
-        ip_range = [ip_masked_address + str(i) for i in range(2, 6)]
+        scan_start_range = int(start_ip.split('.')[-1])
+        scan_end_range = int(end_ip.split('.')[-1])
+
+        ip_range = [ip_masked_address + str(i) for i in range(scan_start_range, scan_end_range)]
         for ip in ip_range:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(1)
@@ -428,7 +431,18 @@ class GUI(App):
         info_popup_wrong_ip.open()
 
     def generic_info_popup(reason):
-        info_popup = Popup(title='Info', content=Label(text=reason), size_hint=(0.6, 0.25))
+        # for ~30 chars in line; width should be 0.65
+        # single line should have 0.25 height
+        n_characters = int(len(str(reason)))
+        n_lines = int(n_characters // 30)
+
+        if n_characters % 30 > 0:
+            n_lines += 1
+
+        y_dimension = int(0.25)
+        y_dimension += n_lines * 0.25
+
+        info_popup = Popup(title='Info', content=Label(text=reason), size_hint=(0.65, y_dimension))
         info_popup.open()
 
     # Below.: packing the frontend up
