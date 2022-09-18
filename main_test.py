@@ -63,8 +63,6 @@ class all_test_suite(unittest.TestCase):
         self.assertIsNone(discovery.scan_network(start_ip="999.999.999.999", end_ip="999.999.999.999", subnetwork_port="999"))
 
     def test_discovery_verify_if_proxmox(self):
-        #mock_request.side_effect = requests.exceptions.ConnectionError
-        #self.assertIsNone(discovery.verify_if_proxmox("999.999.999.999"))
         self.assertIsNotNone(discovery.verify_if_proxmox(proxmox_ips=[]))
 
     def test_discovery_retrive_proxmox_mac(self):
@@ -72,6 +70,11 @@ class all_test_suite(unittest.TestCase):
 
     def test_discovery_append_ips_mac_to_list(self):
         self.assertIsNotNone(discovery.append_ips_mac_to_list())
+
+    #####################################################################################
+
+    def test_redfish_handler_get_power_state(self):
+        self.assertIsNone(redfish_handler.get_power_state(irmc_ip="999.999.999.999", user="admin", passwd="admin"))
 
     #####################################################################################
 
